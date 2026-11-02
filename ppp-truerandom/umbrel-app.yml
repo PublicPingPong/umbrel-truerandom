@@ -4,7 +4,7 @@ category: developer
 name: True Random
 version: "0.1.0"
 tagline: Echter Zufall aus dem Infinite Noise TRNG – als API für deine Apps
-icon: https://raw.githubusercontent.com/GITHUB_USER/umbrel-truerandom/main/ppp-truerandom/icon.svg
+icon: https://raw.githubusercontent.com/publicpingpong/umbrel-truerandom/main/ppp-truerandom/icon.svg
 description: >-
   Liest den per USB angeschlossenen Infinite Noise TRNG aus und stellt echten
   Zufall über eine einfache HTTP-API bereit: Bytes, ganze Zahlen, Fließkommazahlen,
@@ -21,9 +21,9 @@ description: >-
 developer: Public Ping Pong LLC
 website: https://publicpingpong.com
 submitter: Public Ping Pong LLC
-submission: https://github.com/GITHUB_USER/umbrel-truerandom
-repo: https://github.com/GITHUB_USER/umbrel-truerandom
-support: https://github.com/GITHUB_USER/umbrel-truerandom/issues
+submission: https://github.com/publicpingpong/umbrel-truerandom
+repo: https://github.com/publicpingpong/umbrel-truerandom
+support: https://github.com/publicpingpong/umbrel-truerandom/issues
 port: 8517
 gallery: []
 releaseNotes: >-
