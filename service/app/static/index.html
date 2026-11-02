@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>True Random</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e1dc;
+    --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b; --accent: #3b5bdb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111214; --card: #1b1c1f; --text: #ececec; --muted: #9a9aa0; --line: #2c2d31;
+            --ok: #4cc77f; --warn: #e0a84a; --bad: #f06a5d; --accent: #8ea4ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .wide { grid-column: 1 / -1; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 18px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+  .ok .dot { background: var(--ok); } .warn .dot { background: var(--warn); } .bad .dot { background: var(--bad); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin-top: 10px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .big { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; margin: 8px 0 0; white-space: pre-wrap; word-break: break-all; }
+  button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  svg { width: 100%; height: 70px; display: block; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>True Random</h1>
+  <p class="sub">Echter Zufall aus dem Infinite Noise TRNG · <span id="ver"></span></p>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Quelle</h2>
+      <div id="state" class="badge"><span class="dot"></span><span>Lade …</span></div>
+      <p id="msg" class="muted"></p>
+      <dl class="kv">
+        <dt>Liefert</dt><dd id="rate">–</dd>
+        <dt>Ausgegeben</dt><dd id="out">–</dd>
+        <dt>Neustarts</dt><dd id="restarts">–</dd>
+        <dt>Laufzeit</dt><dd id="uptime">–</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Entropie (Rohbits)</h2>
+      <div class="big" id="ent">–</div>
+      <div class="muted">Bit pro Rohbit · Designwert <span id="design"></span></div>
+      <svg id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Verlauf der Entropie-Schätzung"></svg>
+      <dl class="kv">
+        <dt>Geschätztes K</dt><dd id="k">–</dd>
+        <dt>Anteil Einsen</dt><dd id="ones">–</dd>
+        <dt>Health-Check</dt><dd id="hc">–</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Puffer</h2>
+      <div class="big" id="pool">–</div>
+      <div class="bar"><div id="poolbar"></div></div>
+      <p class="muted">Vorrat frischer Bytes. Jedes Byte wird genau einmal ausgegeben. Ist der Puffer voll, pausiert der TRNG.</p>
+    </section>
+
+    <section class="card wide">
+      <h2>API</h2>
+      <div class="row">
+        <span class="muted">API-Key</span>
+        <code id="key" class="mono">••••••••</code>
+        <button id="showkey">Anzeigen</button>
+        <button id="copykey">Kopieren</button>
+        <button id="rotate">Neu erzeugen</button>
+      </div>
+      <pre id="example"></pre>
+      <div class="row">
+        <button class="primary" id="try">Testwurf: 10 × W6</button>
+        <span id="tryout" class="mono"></span>
+      </div>
+      <p class="muted">Endpunkte: <code>/v1/bytes?n=</code> · <code>/v1/int?min=&amp;max=&amp;count=</code> · <code>/v1/float?count=</code> · <code>/v1/shuffle?n=</code> · <code>/v1/choice?n=&amp;k=</code> · <code>/v1/health</code>.
+        Key per Header <code>X-API-Key</code> oder <code>Authorization: Bearer …</code>.</p>
+    </section>
+
+    <section class="card wide">
+      <h2>Rohdaten-Test</h2>
+      <p class="muted">Hält den Betrieb kurz an, nimmt ungewhitete Rohbits auf und schätzt deren Entropie.
+        Aussagekräftig ist nur dieser Test – die normale Ausgabe besteht jeden Statistiktest, weil sie gehasht ist.
+        Für eine belastbare Prüfung die Datei mit NIST <code>ea_non_iid</code> auswerten.</p>
+      <div class="row">
+        <button id="raw" class="primary">1 MB Rohdaten aufnehmen</button>
+        <span id="rawstate" class="muted"></span>
+      </div>
+      <dl class="kv" id="rawres" hidden>
+        <dt>Aufgenommen</dt><dd id="rbytes"></dd>
+        <dt>infnoise-Schätzung</dt><dd id="rent"></dd>
+        <dt>MCV-Mindestentropie (8-Bit-Samples)</dt><dd id="rmcv"></dd>
+        <dt>Anteil Einsen</dt><dd id="rones"></dd>
+        <dt>Datei</dt><dd id="rfile"></dd>
+      </dl>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let KEY = "", keyShown = false;
+
+const LABEL = {
+  ok: ["ok", "Läuft – echter Zufall"],
+  starting: ["warn", "Startet …"],
+  paused: ["warn", "Pausiert (Rohdaten-Test)"],
+  no_device: ["bad", "TRNG nicht gefunden"],
+  health_failed: ["bad", "Health-Check fehlgeschlagen"],
+  error: ["bad", "Fehler"],
+};
+const fmtB = n => n >= 1048576 ? (n/1048576).toFixed(2) + " MB" : n >= 1024 ? (n/1024).toFixed(1) + " KB" : n + " B";
+const fmtT = s => s >= 86400 ? Math.floor(s/86400) + " d " + Math.floor(s%86400/3600) + " h"
+              : s >= 3600 ? Math.floor(s/3600) + " h " + Math.floor(s%3600/60) + " min" : Math.floor(s/60) + " min";
+
+function spark(hist, design) {
+  const svg = $("spark");
+  if (!hist.length) { svg.innerHTML = ""; return; }
+  const lo = 0.7, hi = 0.95, y = v => 70 - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * 66 - 2;
+  const pts = hist.map((h, i) => `${hist.length === 1 ? 150 : i / (hist.length - 1) * 300},${y(h.entropy_per_bit)}`).join(" ");
+  svg.innerHTML = `<line x1="0" x2="300" y1="${y(design)}" y2="${y(design)}" stroke="currentColor" stroke-opacity=".25" stroke-dasharray="4 4"/>
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+
+function renderKey() {
+  $("key").textContent = keyShown ? KEY : "••••••••" + KEY.slice(-4);
+  $("showkey").textContent = keyShown ? "Verbergen" : "Anzeigen";
+  const base = location.origin;
+  $("example").textContent =
+`curl -H "X-API-Key: ${keyShown ? KEY : "<API-KEY>"}" "${base}/v1/int?min=1&max=6&count=10"`;
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch("api/status")).json();
+    $("ver").textContent = "v" + s.version + " · Quelle: " + s.source;
+    const [cls, txt] = LABEL[s.state] || ["warn", s.state];
+    $("state").className = "badge " + cls; $("state").lastElementChild.textContent = txt;
+    $("msg").textContent = s.state === "ok" ? "" : (s.last_message || "");
+    $("rate").textContent = s.rate_bytes_per_s ? fmtB(s.rate_bytes_per_s) + "/s" : (s.pool_bytes >= s.pool_max ? "Puffer voll" : "–");
+    $("out").textContent = fmtB(s.bytes_out) + " · " + s.requests.requests + " Anfragen";
+    $("restarts").textContent = s.restarts;
+    $("uptime").textContent = fmtT(s.uptime_s);
+    const h = s.health || {};
+    $("ent").textContent = h.entropy_per_bit != null ? h.entropy_per_bit.toFixed(4) : "–";
+    $("design").textContent = s.design_entropy_per_bit;
+    $("k").textContent = h.k != null ? h.k.toFixed(3) : "–";
+    $("ones").textContent = h.ones_pct != null ? h.ones_pct.toFixed(2) + " %" : "–";
+    $("hc").textContent = h.ok == null ? "–" : h.ok ? "bestanden" : "NICHT bestanden";
+    spark(s.history || [], s.design_entropy_per_bit);
+    $("pool").textContent = fmtB(s.pool_bytes);
+    $("poolbar").style.width = (s.pool_bytes / s.pool_max * 100) + "%";
+    if (KEY !== s.api_key) { KEY = s.api_key; renderKey(); }
+    if (s.raw_test && s.raw_test.finished) showRaw(s.raw_test);
+  } catch (e) {
+    $("state").className = "badge bad"; $("state").lastElementChild.textContent = "Dienst nicht erreichbar";
+  }
+}
+
+function showRaw(r) {
+  $("rawres").hidden = false;
+  $("rbytes").textContent = fmtB(r.bytes || 0) + " · " + r.finished.replace("T", " ").slice(0, 19) + " UTC";
+  const ie = r.infnoise || {};
+  $("rent").textContent = ie.entropy_per_bit != null ? ie.entropy_per_bit.toFixed(4) + " Bit/Bit" : (ie.message || "–");
+  $("rmcv").textContent = r.mcv_min_entropy_per_bit != null ? r.mcv_min_entropy_per_bit.toFixed(4) + " Bit/Bit" : "–";
+  $("rones").textContent = r.ones_ratio != null ? (r.ones_ratio * 100).toFixed(2) + " %" : "–";
+  $("rfile").innerHTML = r.file ? `<a href="api/raw/${r.file}">${r.file}</a>` : "–";
+}
+
+$("showkey").onclick = () => { keyShown = !keyShown; renderKey(); };
+$("copykey").onclick = () => navigator.clipboard.writeText(KEY);
+$("rotate").onclick = async () => {
+  if (!confirm("Neuen API-Key erzeugen? Alle Apps brauchen dann den neuen Key.")) return;
+  KEY = (await (await fetch("api/rotate-key", { method: "POST" })).json()).api_key; renderKey();
+};
+$("try").onclick = async () => {
+  $("tryout").textContent = "…";
+  const r = await (await fetch("v1/int?min=1&max=6&count=10", { headers: { "X-API-Key": KEY } })).json();
+  $("tryout").textContent = r.data ? r.data.join(" ") + `  (${r.bytes_used} Bytes, ${r.source})` : r.error;
+};
+$("raw").onclick = async () => {
+  $("raw").disabled = true; $("rawstate").textContent = "Nimmt auf … (die API pausiert kurz)";
+  try {
+    const r = await (await fetch("api/rawtest?mb=1", { method: "POST" })).json();
+    if (r.error) $("rawstate").textContent = r.error; else { $("rawstate").textContent = ""; showRaw(r); }
+  } finally { $("raw").disabled = false; }
+};
+
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

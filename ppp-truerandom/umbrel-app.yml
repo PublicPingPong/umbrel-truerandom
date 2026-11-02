@@ -1,0 +1,34 @@
+manifestVersion: 1
+id: ppp-truerandom
+category: developer
+name: True Random
+version: "0.1.0"
+tagline: Echter Zufall aus dem Infinite Noise TRNG – als API für deine Apps
+icon: https://raw.githubusercontent.com/GITHUB_USER/umbrel-truerandom/main/ppp-truerandom/icon.svg
+description: >-
+  Liest den per USB angeschlossenen Infinite Noise TRNG aus und stellt echten
+  Zufall über eine einfache HTTP-API bereit: Bytes, ganze Zahlen, Fließkommazahlen,
+  Permutationen und Ziehungen ohne Zurücklegen.
+
+
+  Kein Pseudozufall: Jedes Ergebnis entsteht direkt aus frischen Bytes des TRNG,
+  jedes Byte wird genau einmal verwendet, Zahlenbereiche werden ohne Modulo-Bias
+  erzeugt. Fällt der TRNG aus, liefert die API einen Fehler statt Ersatz-Zufall.
+
+
+  Die Verwaltungsseite zeigt den Zustand des Geräts, die laufende
+  Entropie-Schätzung des Health-Checks und bietet einen Rohdaten-Test.
+developer: Public Ping Pong LLC
+website: https://publicpingpong.com
+submitter: Public Ping Pong LLC
+submission: https://github.com/GITHUB_USER/umbrel-truerandom
+repo: https://github.com/GITHUB_USER/umbrel-truerandom
+support: https://github.com/GITHUB_USER/umbrel-truerandom/issues
+port: 8517
+gallery: []
+releaseNotes: >-
+  Erste Version.
+dependencies: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""

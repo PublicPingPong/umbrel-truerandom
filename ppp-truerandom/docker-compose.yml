@@ -1,0 +1,24 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      # Format: <app-id>_<service-name>_1
+      APP_HOST: ppp-truerandom_web_1
+      APP_PORT: 8080
+      # Die API (/v1/*) ist am Umbrel-Login vorbei erreichbar und wird stattdessen
+      # per API-Key geschützt. Alles andere (Verwaltungsseite) bleibt hinter dem Login.
+      PROXY_AUTH_WHITELIST: "/v1/*"
+
+  web:
+    image: ghcr.io/GITHUB_USER/truerandom:0.1.0
+    restart: on-failure
+    init: true
+    stop_grace_period: 10s
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+      # USB-Zugriff für den TRNG (FTDI-Chip). Kein privileged-Modus:
+      # nur USB-Geräte (Major 189) werden freigegeben, auch nach Ab-/Anstecken.
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - "c 189:* rmw"
