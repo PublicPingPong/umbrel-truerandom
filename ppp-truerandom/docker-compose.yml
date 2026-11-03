@@ -11,7 +11,7 @@ services:
       PROXY_AUTH_WHITELIST: "/v1/*"
 
   web:
-    image: ghcr.io/publicpingpong/truerandom:0.1.0
+    image: ghcr.io/publicpingpong/truerandom:0.1.1
     restart: on-failure
     init: true
     stop_grace_period: 10s
