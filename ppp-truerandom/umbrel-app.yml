@@ -2,7 +2,7 @@ manifestVersion: 1
 id: ppp-truerandom
 category: developer
 name: True Random
-version: "0.1.0"
+version: "0.1.1"
 tagline: Echter Zufall aus dem Infinite Noise TRNG – als API für deine Apps
 icon: https://raw.githubusercontent.com/publicpingpong/umbrel-truerandom/main/ppp-truerandom/icon.svg
 description: >-
