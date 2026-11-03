@@ -26,9 +26,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Version aus Tag
+      - name: Version und Name (klein geschrieben)
         id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
@@ -36,5 +38,5 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/truerandom:${{ steps.v.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/truerandom:latest
+            ghcr.io/${{ steps.v.outputs.owner }}/truerandom:${{ steps.v.outputs.version }}
+            ghcr.io/${{ steps.v.outputs.owner }}/truerandom:latest
