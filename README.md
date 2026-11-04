@@ -18,7 +18,7 @@ service/                      Quellcode des Docker-Images
 ## Einrichtung (einmalig)
 
 1. **GitHub-Repo anlegen**, z. B. `umbrel-truerandom`, und den Inhalt dieses Ordners hochladen.
-2. Überall **`GITHUB_USER`** durch deinen GitHub-Namen in Kleinbuchstaben ersetzen. Das betrifft `ppp-truerandom/umbrel-app.yml` und `ppp-truerandom/docker-compose.yml`.
+2. Überall **`PublicPingPong`** durch deinen GitHub-Namen in Kleinbuchstaben ersetzen. Das betrifft `ppp-truerandom/umbrel-app.yml` und `ppp-truerandom/docker-compose.yml`.
 3. **Image bauen lassen:** einen Tag `v0.1.0` erstellen und pushen. Die GitHub Action testet die Zufallslogik, baut das Image und legt es unter `ghcr.io/<name>/truerandom:0.1.0` ab.
 4. Auf GitHub unter *Packages → truerandom → Package settings* die Sichtbarkeit auf **Public** stellen. Sonst kann der Umbrel das Image nicht laden.
 5. **Im Umbrel:** App Store → „…“ (oben rechts) → *Community App Stores* → die Repo-URL eintragen. Danach „True Random“ installieren.
@@ -38,6 +38,7 @@ Den API-Key findest du auf der Verwaltungsseite. Mitgeschickt wird er per Header
 | `/v1/float` | `count` | Zahlen in [0, 1), 53 Bit Auflösung |
 | `/v1/shuffle` | `n` (≤ 10000), `start` (Std. 0) | Permutation von start … start+n−1 |
 | `/v1/choice` | `n`, `k`, `start` | k verschiedene Werte ohne Zurücklegen |
+| `/v1/symbol` | – | Eines von 5 Symbolen: `kreis`, `kreuz`, `quadrat`, `wellen`, `stern` |
 | `/v1/health` | – | Zustand der Quelle |
 
 Jede Antwort enthält neben `data` auch `source`, `id`, `timestamp` und `bytes_used`.
@@ -47,6 +48,17 @@ Ist kein echter Zufall verfügbar, kommt **HTTP 503**. Es gibt nie einen Ersatz 
 curl -H "X-API-Key: $KEY" "http://umbrel.local:8517/v1/choice?n=40&k=6&start=1"
 # {"data": [12, 14, 3, 19, 1, 8], "source": "infnoise", "id": "…", "timestamp": "…", "bytes_used": 64}
 ```
+
+## Zeitpunkt des Zufalls: Betriebsart „Jetzt“
+
+Standardmäßig (`MODE: fresh`) wird **kein Vorrat** gehalten. Der Dienst liest den TRNG ständig mit, gibt einer Anfrage aber nur Bytes, die **nach ihrem Eingang** entstanden sind:
+
+- `infnoise` läuft unter `stdbuf -o0` und schreibt jeden Block von rund 400 Bytes sofort.
+- Verwendet werden nur Blöcke, deren **Vorgängerblock** schon nach der Anfrage ankam. Damit sind auch die Rohbits nachweislich erst danach gemessen worden.
+- Was nicht abgeholt wird, wird nach 2 Sekunden verworfen.
+- Die Antwort belegt das mit `requested_at`, `generated_from`, `generated_to`, `wait_ms` und `generated_after_request: true`. Die Wartezeit liegt typischerweise bei 10–50 ms.
+
+`MODE: pool` in `docker-compose.yml` schaltet auf einen klassischen Vorrat um. Das bringt mehr Durchsatz bei Spitzen, die Bytes können dann aber älter sein als die Anfrage.
 
 ## Was der Dienst garantiert
 

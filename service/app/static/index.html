@@ -41,6 +41,16 @@
   .muted { color: var(--muted); font-size: 13px; }
   svg { width: 100%; height: 70px; display: block; }
   a { color: var(--accent); }
+  .draw { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+  .draw > div { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+  .draw label { color: var(--muted); }
+  .draw input { font: inherit; width: 9em; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+                background: var(--bg); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+  .result { font-size: 64px; font-weight: 700; line-height: 1.1; min-height: 1.1em; font-variant-numeric: tabular-nums; word-break: break-all; }
+  svg.symbol { width: 150px; height: 150px; color: var(--text); }
+  .pop { animation: pop .35s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+  .symname { font-weight: 600; font-size: 18px; min-height: 1.5em; }
 </style>
 </head>
 <body>
@@ -74,10 +84,32 @@
     </section>
 
     <section class="card">
-      <h2>Puffer</h2>
-      <div class="big" id="pool">–</div>
-      <div class="bar"><div id="poolbar"></div></div>
-      <p class="muted">Vorrat frischer Bytes. Jedes Byte wird genau einmal ausgegeben. Ist der Puffer voll, pausiert der TRNG.</p>
+      <h2 id="modetitle">Betriebsart</h2>
+      <div class="big" id="modename">–</div>
+      <div class="bar" id="poolbarwrap"><div id="poolbar"></div></div>
+      <p class="muted" id="modetext"></p>
+      <dl class="kv"><dt id="poollabel">Im Puffer</dt><dd id="pool">–</dd></dl>
+    </section>
+
+    <section class="card wide">
+      <h2>Ziehen</h2>
+      <div class="draw">
+        <div>
+          <div class="row" style="justify-content:center">
+            <label for="xmax">Zahl zwischen 0 und</label>
+            <input id="xmax" inputmode="numeric" value="100" aria-label="Obergrenze">
+          </div>
+          <div id="numres" class="result">–</div>
+          <button class="primary" id="numbtn">Zahl ziehen</button>
+          <div id="nummeta" class="muted"></div>
+        </div>
+        <div>
+          <svg id="sym" class="symbol" viewBox="0 0 100 100" aria-label="gezogenes Symbol" role="img"></svg>
+          <div id="symname" class="symname">&nbsp;</div>
+          <button class="primary" id="symbtn">Symbol ziehen</button>
+          <div id="symmeta" class="muted"></div>
+        </div>
+      </div>
     </section>
 
     <section class="card wide">
@@ -94,13 +126,13 @@
         <button class="primary" id="try">Testwurf: 10 × W6</button>
         <span id="tryout" class="mono"></span>
       </div>
-      <p class="muted">Endpunkte: <code>/v1/bytes?n=</code> · <code>/v1/int?min=&amp;max=&amp;count=</code> · <code>/v1/float?count=</code> · <code>/v1/shuffle?n=</code> · <code>/v1/choice?n=&amp;k=</code> · <code>/v1/health</code>.
+      <p class="muted">Endpunkte: <code>/v1/bytes?n=</code> · <code>/v1/int?min=&amp;max=&amp;count=</code> · <code>/v1/float?count=</code> · <code>/v1/shuffle?n=</code> · <code>/v1/choice?n=&amp;k=</code> · <code>/v1/symbol</code> · <code>/v1/health</code>.
         Key per Header <code>X-API-Key</code> oder <code>Authorization: Bearer …</code>.</p>
     </section>
 
     <section class="card wide">
       <h2>Rohdaten-Test</h2>
-      <p class="muted">Hält den Betrieb kurz an, nimmt ungewhitete Rohbits auf und schätzt deren Entropie.
+      <p class="muted">Hält den Betrieb an (dauert etwa 10–30 Sekunden), nimmt ungewhitete Rohbits auf und schätzt deren Entropie.
         Aussagekräftig ist nur dieser Test – die normale Ausgabe besteht jeden Statistiktest, weil sie gehasht ist.
         Für eine belastbare Prüfung die Datei mit NIST <code>ea_non_iid</code> auswerten.</p>
       <div class="row">
@@ -158,7 +190,7 @@ async function refresh() {
     const [cls, txt] = LABEL[s.state] || ["warn", s.state];
     $("state").className = "badge " + cls; $("state").lastElementChild.textContent = txt;
     $("msg").textContent = s.state === "ok" ? "" : (s.last_message || "");
-    $("rate").textContent = s.rate_bytes_per_s ? fmtB(s.rate_bytes_per_s) + "/s" : (s.pool_bytes >= s.pool_max ? "Puffer voll" : "–");
+    $("rate").textContent = s.rate_bytes_per_s ? fmtB(s.rate_bytes_per_s) + "/s" : (s.mode === "pool" && s.pool_bytes >= s.pool_max ? "Puffer voll" : "–");
     $("out").textContent = fmtB(s.bytes_out) + " · " + s.requests.requests + " Anfragen";
     $("restarts").textContent = s.restarts;
     $("uptime").textContent = fmtT(s.uptime_s);
@@ -170,7 +202,18 @@ async function refresh() {
     $("hc").textContent = h.ok == null ? "–" : h.ok ? "bestanden" : "NICHT bestanden";
     spark(s.history || [], s.design_entropy_per_bit);
     $("pool").textContent = fmtB(s.pool_bytes);
-    $("poolbar").style.width = (s.pool_bytes / s.pool_max * 100) + "%";
+    if (s.mode === "fresh") {
+      $("modename").textContent = "Jetzt";
+      $("modetext").textContent = "Jede Anfrage bekommt nur Bytes, deren Rohbits erst nach Eingang der Anfrage gemessen wurden. Älteres wird nach 2 Sekunden verworfen, nichts wird auf Vorrat gehalten.";
+      $("poollabel").textContent = "Letzte 2 s (wird verworfen)";
+      $("poolbarwrap").hidden = true;
+    } else {
+      $("modename").textContent = "Vorrat";
+      $("modetext").textContent = "Vorrat von Bytes für hohen Durchsatz. Jedes Byte wird genau einmal ausgegeben; Bytes können aber älter sein als die Anfrage.";
+      $("poollabel").textContent = "Im Puffer";
+      $("poolbarwrap").hidden = false;
+      $("poolbar").style.width = (s.pool_bytes / s.pool_max * 100) + "%";
+    }
     if (KEY !== s.api_key) { KEY = s.api_key; renderKey(); }
     if (s.raw_test && s.raw_test.finished) showRaw(s.raw_test);
   } catch (e) {
@@ -197,7 +240,7 @@ $("rotate").onclick = async () => {
 $("try").onclick = async () => {
   $("tryout").textContent = "…";
   const r = await (await fetch("v1/int?min=1&max=6&count=10", { headers: { "X-API-Key": KEY } })).json();
-  $("tryout").textContent = r.data ? r.data.join(" ") + `  (${r.bytes_used} Bytes, ${r.source})` : r.error;
+  $("tryout").textContent = r.data ? r.data.join(" ") + `  (${r.bytes_used} Bytes, ${r.source}` + (r.generated_after_request ? `, entstanden ${r.wait_ms} ms nach der Anfrage)` : ")") : r.error;
 };
 $("raw").onclick = async () => {
   $("raw").disabled = true; $("rawstate").textContent = "Nimmt auf … (die API pausiert kurz)";
@@ -205,6 +248,48 @@ $("raw").onclick = async () => {
     const r = await (await fetch("api/rawtest?mb=1", { method: "POST" })).json();
     if (r.error) $("rawstate").textContent = r.error; else { $("rawstate").textContent = ""; showRaw(r); }
   } finally { $("raw").disabled = false; }
+};
+
+// ---------- Ziehen ----------
+const SYM = {
+  kreis:   ["Kreis",   `<circle cx="50" cy="50" r="36"/>`],
+  kreuz:   ["Kreuz",   `<line x1="50" y1="12" x2="50" y2="88"/><line x1="12" y1="50" x2="88" y2="50"/>`],
+  quadrat: ["Quadrat", `<rect x="16" y="16" width="68" height="68"/>`],
+  wellen:  ["Wellen",  [30, 50, 70].map(y => `<path d="M10 ${y} q10 -11 20 0 t20 0 t20 0 t20 0"/>`).join("")],
+  stern:   ["Stern",   `<polygon points="50.0,13.0 59.4,40.1 88.0,40.6 65.2,57.9 73.5,85.4 50.0,69.0 26.5,85.4 34.8,57.9 12.0,40.6 40.6,40.1"/>`],
+};
+const meta = r => r.generated_after_request
+  ? `entstanden ${r.wait_ms} ms nach dem Klick · ${r.source}`
+  : r.source;
+function pop(el) { el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+async function draw(url) {
+  const res = await fetch(url, { headers: { "X-API-Key": KEY } });
+  return res.json();
+}
+
+$("numbtn").onclick = async () => {
+  const x = $("xmax").value.trim();
+  if (!/^\d+$/.test(x)) { $("nummeta").textContent = "Bitte eine ganze Zahl ≥ 0 eingeben."; return; }
+  $("numbtn").disabled = true;
+  try {
+    const r = await draw(`v1/int?min=0&max=${x}`);
+    if (r.error) { $("numres").textContent = "–"; $("nummeta").textContent = r.error; return; }
+    $("numres").textContent = r.data[0]; pop($("numres"));
+    $("nummeta").textContent = `0 … ${x} · ` + meta(r);
+  } finally { $("numbtn").disabled = false; }
+};
+$("xmax").addEventListener("keydown", e => { if (e.key === "Enter") $("numbtn").click(); });
+
+$("symbtn").onclick = async () => {
+  $("symbtn").disabled = true;
+  try {
+    const r = await draw("v1/symbol");
+    if (r.error) { $("symmeta").textContent = r.error; return; }
+    const [label, shape] = SYM[r.data.name];
+    $("sym").innerHTML = `<g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">${shape}</g>`;
+    $("symname").textContent = label; pop($("sym"));
+    $("symmeta").textContent = meta(r);
+  } finally { $("symbtn").disabled = false; }
 };
 
 refresh(); setInterval(refresh, 2000);

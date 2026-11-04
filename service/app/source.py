@@ -4,6 +4,20 @@
 gemessen hat, und nur, solange der eingebaute Health-Check besteht. Mit
 `--debug` schreibt es etwa alle 2^20 Rohbits eine Statuszeile nach stderr, die
 wir für die Gesundheitsanzeige auswerten.
+
+Zwei Betriebsarten:
+
+  fresh (Standard)  Zufall entsteht NACH Eingang der Anfrage. Der Dienst liest
+                    den TRNG ständig mit, verwirft aber alles, was älter ist
+                    als die Anfrage. Verwendet werden nur Datenblöcke, deren
+                    Vorgängerblock schon nach der Anfrage ankam – damit sind
+                    auch die Rohbits nachweislich erst danach gemessen worden.
+  pool              Klassischer Vorrat (bis pool_max Bytes) für hohen
+                    Durchsatz. Bytes können dann Minuten bis Tage alt sein.
+
+`infnoise` läuft unter `stdbuf -o0`, damit es jeden Block (~400 Bytes) sofort
+schreibt statt 4–8 KB zu sammeln. Das hält die Wartezeit bei einigen
+Millisekunden.
 """
 
 from __future__ import annotations
@@ -33,12 +47,20 @@ class Unavailable(Exception):
 
 
 class EntropySource:
-    def __init__(self, cmd: list[str], label: str, pool_max: int = 4 * 1024 * 1024):
+    def __init__(self, cmd: list[str], label: str, mode: str = "fresh",
+                 pool_max: int = 4 * 1024 * 1024, fresh_max_age: float = 2.0):
+        if mode not in ("fresh", "pool"):
+            raise ValueError("mode muss fresh oder pool sein")
         self.cmd = cmd
         self.label = label
+        self.mode = mode
         self.pool_max = pool_max
+        self.fresh_max_age = fresh_max_age
 
-        self._pool = bytearray()
+        # Blöcke: [ankunft, ankunft_vorgänger, daten, gelesen_bis]
+        self._chunks: deque = deque()
+        self._size = 0
+        self._last_arrival = 0.0
         self._cond = threading.Condition()
         self._proc: subprocess.Popen | None = None
         self._paused = threading.Event()
@@ -93,10 +115,12 @@ class EntropySource:
         err_thread.start()
         try:
             while True:
-                # Gegendruck: Pool voll -> nicht lesen; infnoise blockiert dann im Pipe.
-                with self._cond:
-                    while len(self._pool) >= self.pool_max and not self._paused.is_set():
-                        self._cond.wait(0.5)
+                # Pool-Modus: Gegendruck, wenn voll (infnoise blockiert dann im Pipe).
+                # Fresh-Modus: immer weiterlesen, Altes wird verworfen.
+                if self.mode == "pool":
+                    with self._cond:
+                        while self._size >= self.pool_max and not self._paused.is_set():
+                            self._cond.wait(0.5)
                 if self._paused.is_set():
                     break
                 chunk = proc.stdout.read(4096)
@@ -104,10 +128,13 @@ class EntropySource:
                     break
                 if self.state not in ("health_failed",):
                     self.state = "ok"
+                now = time.time()
                 with self._cond:
-                    room = self.pool_max - len(self._pool)
-                    self._pool += chunk[:room]
+                    self._chunks.append([now, self._last_arrival, chunk, 0])
+                    self._last_arrival = now
+                    self._size += len(chunk)
                     self.bytes_in += len(chunk)
+                    self._expire(now)
                     self._cond.notify_all()
                 self._rate_window.append((time.time(), self.bytes_in))
         finally:
@@ -170,21 +197,53 @@ class EntropySource:
                 self.last_error = line
 
     # --------------------------------------------------------------- Entnahme
-    def take(self, n: int, timeout: float = 30.0) -> bytes:
-        """Entnimmt genau n Bytes. Entnommene Bytes verlassen den Pool für immer."""
+    def _expire(self, now: float) -> None:
+        """Verwirft Blöcke, die im Fresh-Modus zu alt sind (Lock muss gehalten werden)."""
+        if self.mode != "fresh":
+            return
+        limit = now - self.fresh_max_age
+        while self._chunks and self._chunks[0][0] < limit:
+            c = self._chunks.popleft()
+            self._size -= len(c[2]) - c[3]
+
+    def take(self, n: int, timeout: float = 30.0, after: float | None = None,
+             meta: dict | None = None) -> bytes:
+        """Entnimmt genau n Bytes. Entnommene Bytes verlassen den Puffer für immer.
+
+        after: nur Bytes verwenden, die nachweislich nach diesem Zeitpunkt
+               entstanden sind (Vorgängerblock kam nach `after` an).
+        meta:  wird mit first/last (Ankunftszeiten der verwendeten Blöcke) gefüllt.
+        """
         deadline = time.time() + timeout
         out = bytearray()
         with self._cond:
             while len(out) < n:
-                if self.state in ("no_device", "health_failed", "error", "paused") and not self._pool:
-                    raise Unavailable(self._unavailable_msg())
-                if self._pool:
-                    k = min(n - len(out), len(self._pool))
-                    out += self._pool[:k]
-                    del self._pool[:k]
+                self._expire(time.time())
+                got = False
+                for c in self._chunks:
+                    arrival, prev, data, pos = c
+                    if pos >= len(data):
+                        continue
+                    if after is not None and prev <= after:
+                        continue  # könnte vor der Anfrage entstanden sein
+                    k = min(n - len(out), len(data) - pos)
+                    out += data[pos : pos + k]
+                    c[3] = pos + k
+                    self._size -= k
                     self.bytes_out += k
+                    if meta is not None:
+                        meta.setdefault("first", arrival)
+                        meta["last"] = arrival
+                    got = True
+                    if len(out) >= n:
+                        break
+                while self._chunks and self._chunks[0][3] >= len(self._chunks[0][2]):
+                    self._chunks.popleft()
+                if got:
                     self._cond.notify_all()
                     continue
+                if self.state in ("no_device", "health_failed", "error", "paused"):
+                    raise Unavailable(self._unavailable_msg())
                 left = deadline - time.time()
                 if left <= 0:
                     raise Unavailable("Zeitüberschreitung: Quelle liefert gerade nicht schnell genug")
@@ -200,7 +259,8 @@ class EntropySource:
 
     def pool_size(self) -> int:
         with self._cond:
-            return len(self._pool)
+            self._expire(time.time())
+            return self._size
 
     def rate(self) -> float:
         w = list(self._rate_window)

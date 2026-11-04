@@ -34,12 +34,13 @@ from source import (  # noqa: E402
     ones_ratio,
 )
 
-VERSION = "0.1.0"
+VERSION = "0.3.0"
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 PORT = int(os.environ.get("PORT", "8080"))
-SOURCE_CMD = shlex.split(os.environ.get("SOURCE_CMD", "infnoise --debug"))
+SOURCE_CMD = shlex.split(os.environ.get("SOURCE_CMD", "stdbuf -o0 infnoise --debug"))
 RAW_CMD = shlex.split(os.environ.get("RAW_CMD", "infnoise --raw --debug"))
 SOURCE_LABEL = os.environ.get("SOURCE_LABEL", "infnoise")
+MODE = os.environ.get("MODE", "fresh")  # fresh = Zufall entsteht nach der Anfrage; pool = Vorrat
 STATIC = Path(__file__).parent / "static"
 
 LIMITS = {"bytes": 65536, "count": 10000, "shuffle": 10000, "choice_n": 1 << 32}
@@ -70,7 +71,7 @@ def save_config(cfg: dict) -> None:
 
 
 CONFIG = load_config()
-SOURCE = EntropySource(SOURCE_CMD, SOURCE_LABEL)
+SOURCE = EntropySource(SOURCE_CMD, SOURCE_LABEL, mode=MODE)
 STATS = {"requests": 0, "errors": 0, "by_endpoint": {}}
 RAW_LOCK = threading.Lock()
 RAW_RESULT: dict = {}
@@ -99,13 +100,20 @@ def q_int(q: dict, name: str, default=None, lo=None, hi=None) -> int:
     return v
 
 
+def iso(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="milliseconds")
+
+
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return iso(time.time())
 
 
 def run_draw(fn):
     """Führt eine Ziehung mit eigenem Drawer aus und liefert Ergebnis + Metadaten."""
-    d = rng.Drawer(SOURCE.take)
+    t0 = time.time()
+    meta: dict = {}
+    fresh = SOURCE.mode == "fresh"
+    d = rng.Drawer(lambda n: SOURCE.take(n, after=t0 if fresh else None, meta=meta))
     try:
         result = fn(d)
     except Unavailable as e:
@@ -114,13 +122,22 @@ def run_draw(fn):
         raise ApiError(400, str(e))
     finally:
         d.close()
-    return {
+    resp = {
         "data": result,
         "source": SOURCE.label,
+        "mode": SOURCE.mode,
         "id": str(uuid.uuid4()),
         "timestamp": now_iso(),
+        "requested_at": iso(t0),
         "bytes_used": d.bytes_consumed,
     }
+    if meta:
+        resp["generated_from"] = iso(meta["first"])
+        resp["generated_to"] = iso(meta["last"])
+        resp["wait_ms"] = round((meta["last"] - t0) * 1000, 1)
+        # fresh: alle Bytes stammen aus Blöcken, deren Rohbits erst nach der Anfrage gemessen wurden
+        resp["generated_after_request"] = fresh
+    return resp
 
 
 # ------------------------------------------------------------------ v1 API
@@ -162,11 +179,23 @@ def v1_choice(q):
     return run_draw(lambda d: rng.choice(d, n, k, start))
 
 
+SYMBOLS = ["kreis", "kreuz", "quadrat", "wellen", "stern"]
+
+
+def v1_symbol(q):
+    """Eines der fünf Symbole (Kreis, Kreuz, Quadrat, Wellen, Stern), gleich wahrscheinlich."""
+    def f(d):
+        i = rng.randbelow(d, len(SYMBOLS))
+        return {"index": i, "name": SYMBOLS[i]}
+    return run_draw(f)
+
+
 def v1_health(q):
     return {
         "ok": SOURCE.state == "ok",
         "state": SOURCE.state,
         "source": SOURCE.label,
+        "mode": SOURCE.mode,
         "pool_bytes": SOURCE.pool_size(),
         "timestamp": now_iso(),
     }
@@ -178,6 +207,7 @@ V1 = {
     "/v1/float": v1_float,
     "/v1/shuffle": v1_shuffle,
     "/v1/choice": v1_choice,
+    "/v1/symbol": v1_symbol,
     "/v1/health": v1_health,
 }
 
@@ -187,6 +217,7 @@ def api_status():
     return {
         "version": VERSION,
         "source": SOURCE.label,
+        "mode": SOURCE.mode,
         "state": SOURCE.state,
         "last_message": SOURCE.last_error,
         "pool_bytes": SOURCE.pool_size(),
